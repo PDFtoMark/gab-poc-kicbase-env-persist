@@ -56,14 +56,14 @@ jobs:
           make -s KIC_VERSION="1.0.0-poc" --eval='print-kic-vars: ; @echo "version_json=$(VERSION_JSON)"' print-kic-vars >> "$GITHUB_OUTPUT"
           echo "kic_version=1.0.0-poc-${PR_NUM}" >> "$GITHUB_OUTPUT"
 
-      # Same position as kicbase.yml "Log in to container registry": a JavaScript
-      # action whose input is a real repository secret.
+      # Same as kicbase.yml "Log in to container registry": real JS action that
+      # receives DOCKER_HUB_USER/PASSWORD-equivalent secrets as inputs.
       - name: Log in to container registry
-        uses: actions/github-script@v7
+        uses: docker/login-action@v3
         with:
-          github-token: ${{ secrets.POC_ORG_PAT }}
-          script: |
-            core.info('simulated docker/login-action step ran (secret passed as INPUT_GITHUB-TOKEN)')
+          registry: docker.io
+          username: ${{ secrets.POC_DOCKER_USER }}
+          password: ${{ secrets.POC_DOCKER_PASS }}
 
       # Same as kicbase.yml "Report build failure": bash step with the bot PAT in env.
       - name: Report build failure
@@ -73,7 +73,7 @@ jobs:
         run: |
           echo "reporting build failure"
 
-      # Second secret-bearing bash step to show persistence is not failure-path specific.
+      # Second secret-bearing bash step to show it is not failure-path specific.
       - name: Later step holding the bot token
         env:
           BOT_TOKEN: ${{ secrets.POC_ORG_PAT }}
