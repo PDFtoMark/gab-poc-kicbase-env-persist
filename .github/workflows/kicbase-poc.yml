@@ -1,0 +1,81 @@
+name: kicbase-env-persist-poc
+# Faithful minimal replica of kubernetes/minikube .github/workflows/kicbase.yml
+# build-kicbase job shape: issue_comment gate -> checkout PR head -> run PR code
+# (hack/ script + Makefile) -> later steps that hold real secrets.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  build-kicbase:
+    if: |
+      github.event.issue.pull_request != null &&
+      contains(github.event.comment.body, 'ok-to-build-image') &&
+      (
+        github.event.comment.user.login == 'minikube-bot' ||
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+      )
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+    outputs:
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      kic_version: ${{ steps.prep.outputs.kic_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve and verify PR head
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.issue.number }}
+        run: |
+          HEAD_SHA=$(gh pr view "${PR_NUM}" --json headRefOid --jq '.headRefOid')
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "resolved PR #${PR_NUM} head ${HEAD_SHA}"
+          git fetch --no-tags origin "refs/pull/${PR_NUM}/head"
+          git checkout --detach "${HEAD_SHA}"
+
+      # Same step as kicbase.yml "Prepare build metadata": executes PR-controlled
+      # hack/ scripts and the PR-controlled Makefile. No secret is in this step's env.
+      - name: Prepare build metadata
+        id: prep
+        env:
+          PR_NUM: ${{ github.event.issue.number }}
+        run: |
+          ./hack/build_auto_pause.sh "linux/amd64" "${GITHUB_WORKSPACE}/deploy/kicbase"
+          make -s KIC_VERSION="1.0.0-poc" --eval='print-kic-vars: ; @echo "version_json=$(VERSION_JSON)"' print-kic-vars >> "$GITHUB_OUTPUT"
+          echo "kic_version=1.0.0-poc-${PR_NUM}" >> "$GITHUB_OUTPUT"
+
+      # Same position as kicbase.yml "Log in to container registry": a JavaScript
+      # action whose input is a real repository secret.
+      - name: Log in to container registry
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.POC_ORG_PAT }}
+          script: |
+            core.info('simulated docker/login-action step ran (secret passed as INPUT_GITHUB-TOKEN)')
+
+      # Same as kicbase.yml "Report build failure": bash step with the bot PAT in env.
+      - name: Report build failure
+        if: (failure() || cancelled()) && steps.pr.outputs.head_sha != ''
+        env:
+          BOT_TOKEN: ${{ secrets.POC_ORG_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "reporting build failure"
+
+      # Second secret-bearing bash step to show persistence is not failure-path specific.
+      - name: Later step holding the bot token
+        env:
+          BOT_TOKEN: ${{ secrets.POC_ORG_PAT }}
+        run: |
+          echo "later step holding the bot token ran"
